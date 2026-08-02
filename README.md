@@ -639,3 +639,24 @@ Esta arquitectura proporciona:
 • Automated Retraining
 
 • Canary Deployments
+
+---
+
+# TODO
+
+El esqueleto de contenedores (Docker Compose, redes, Dockerfiles) ya está armado y probado de punta a punta. Lo que falta es la lógica de Machine Learning en sí. Checklist de tareas pendientes para tener la plataforma funcionando end-to-end:
+
+- [ ] Portar la limpieza y validación de datos del notebook (`prediction_movies_imdb.ipynb`) a `mlops-platform/ml/preprocessing`.
+- [ ] Portar el feature engineering (encoding de `original_language`, `genres`, `production_countries`, `production_companies`) a `mlops-platform/ml/preprocessing`.
+- [ ] Portar el entrenamiento y la evaluación del modelo a `mlops-platform/ml/training`.
+- [ ] Implementar el registro del modelo entrenado (`register_model`) en el Model Registry de MLflow, bajo el nombre `PredictionMovies`.
+- [ ] Subir `TMDB_movie_dataset_v11.csv` al bucket Raw Data de MinIO (o automatizar su descarga) y completar la tarea `load_data` del DAG.
+- [ ] Conectar las tareas del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) con las funciones reales de `ml/` (hoy son stubs que levantan `NotImplementedError`).
+- [ ] Correr el DAG de punta a punta y confirmar que el modelo `PredictionMovies` queda registrado en MLflow.
+- [ ] Promover una primera versión del modelo a Staging en el Model Registry.
+- [ ] Implementar `ml/inference` (carga del modelo + preprocesamiento del request) y conectarlo al endpoint `/predict` de FastAPI.
+- [ ] Validar `fastapi-staging` con un modelo real en Staging (hoy el servicio crashea al iniciar porque todavía no hay ningún modelo registrado).
+- [ ] Promover el modelo a Production una vez validado y confirmar que `fastapi-production` lo carga correctamente.
+- [ ] Reemplazar el frontend placeholder (hoy solo consulta `/health`) por un formulario real que envíe `budget`, `runtime`, `original_language`, `genres`, `production_countries` y `production_companies` a `/predict`.
+- [ ] (nice-to-have) Separar el bucket "Processed Data" del bucket "Raw Data" en MinIO, tal como describe la arquitectura de este documento (hoy están unificados en un solo bucket `datalake`).
+- [ ] ver manejo de las credenciales dummy de `.env` (MinIO, Postgres, Airflow), hoy agregadas explicitamente.
