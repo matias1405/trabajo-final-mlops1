@@ -2,6 +2,8 @@
 registro del resultado en el Model Registry de MLflow.
 """
 
+import mlflow
+import mlflow.sklearn
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -40,4 +42,12 @@ def evaluate(model, x_test, y_test):
 
 
 def register_model(model, run_metrics, model_name="PredictionMovies"):
-    raise NotImplementedError
+    with mlflow.start_run():
+        mlflow.log_metrics(run_metrics)
+        model_info = mlflow.sklearn.log_model(
+            model,
+            artifact_path="model",
+            registered_model_name=model_name,
+        )
+
+    return model_info.registered_model_version
