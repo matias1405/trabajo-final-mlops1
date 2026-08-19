@@ -51,6 +51,7 @@ def engineer_features(df):
     import numpy as np
     import pandas as pd
     from sklearn.preprocessing import MultiLabelBinarizer
+    from sklearn.model_selection import train_test_split
 
     # convertir variables categóricas separadas por coma a listas
     for col in ["genres", "production_countries", "production_companies"]:
@@ -159,7 +160,17 @@ def engineer_features(df):
     # extraer mes de lanzamiento
     df["release_month"] = pd.to_datetime(df["release_date"]).dt.month
 
-    # eliminar revenue para evitar data leakage
-    df = df.drop(columns=["revenue"])
+    # separar variables predictoras y target
+    X = df.drop(columns=["profitable"])
+    y = df["profitable"]
 
-    return df
+    # separar en train y test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+
+    return X_train, X_test, y_train, y_test
