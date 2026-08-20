@@ -114,12 +114,17 @@ services:
       MLFLOW_S3_ENDPOINT_URL: http://s3:9000
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
+      DATALAKE_BUCKET_NAME: ${DATALAKE_BUCKET_NAME}
+      # Token de la API de Kaggle, usado por la tarea load_data para
+      # descargar el dataset la primera vez (ver .env.template).
+      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
       # Permite `from ml import ...` en los DAGs: ml/ se monta como hermano de dags/.
       PYTHONPATH: /opt/airflow
     volumes: &airflow-common-volumes
       - ./mlops-platform/dags:/opt/airflow/dags
       - ./mlops-platform/ml:/opt/airflow/ml
       - airflow-logs:/opt/airflow/logs
+      - ./volumes/airflow-data:/opt/airflow/data
     entrypoint: >
       /bin/bash -c "
       airflow db migrate &&

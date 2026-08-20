@@ -628,6 +628,34 @@ Esta arquitectura proporciona:
 └── README.md
 ```
 
+---
+
+# Configuración
+
+## Variables de entorno
+
+La plataforma se configura mediante un archivo `.env` en la raíz del repositorio, leído por Docker Compose. Para crear el propio:
+
+```bash
+cp .env.template .env
+```
+
+`.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. La mayoría son credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están. El propio `.env` **no** se versiona (ver `.gitignore`) porque a partir de ahora contiene una credencial real, no solo valores demo: la API key de Kaggle.
+
+## Credenciales de Kaggle
+
+La tarea `load_data` del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) descarga `TMDB_movie_dataset_v11.csv` desde [Kaggle](https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies) y lo sube al bucket Raw Data de MinIO la primera vez que se corre el DAG (si el archivo ya está en MinIO, no se vuelve a descargar). Esto no pasa solo: hay que disparar el DAG manualmente (UI via http://localhost:8080 o `airflow dags trigger prediction_movies_pipeline`) y, si es la primera vez que corre, despausarlo antes (manualmente en la UI o `airflow dags unpause prediction_movies_pipeline`), porque todo DAG nuevo arranca pausado en Airflow. Para descargar el dataset se necesitan credenciales de la API de Kaggle:
+
+1. Crear una cuenta en [kaggle.com](https://www.kaggle.com) si no se tiene una.
+2. Ir a [kaggle.com/settings](https://www.kaggle.com/settings) → sección **API** → **Create New Token**. Esto genera un token nuevo (con prefijo `KGAT_`).
+3. Completar `KAGGLE_API_TOKEN` en el `.env` con ese valor.
+
+Importante: Kaggle ofrece dos formatos de credenciales. Este proyecto usa el **token nuevo** (`KAGGLE_API_TOKEN`), no el `kaggle.json` de las "Legacy API Credentials" (que usa un par `KAGGLE_USERNAME`/`KAGGLE_KEY`) — son mecanismos de autenticación distintos y no intercambiables entre sí.
+
+Sin esta credencial, la tarea `load_data` falla al intentar descargar el dataset desde Kaggle (a menos que el CSV ya se haya subido manualmente al bucket Raw Data).
+
+---
+
 # Future Work
 
 • Model Monitoring
@@ -650,7 +678,7 @@ El esqueleto de contenedores (Docker Compose, redes, Dockerfiles) ya está armad
 - [x] Portar el feature engineering (encoding de `original_language`, `genres`, `production_countries`, `production_companies`) a `mlops-platform/ml/preprocessing`.
 - [x] Portar el entrenamiento y la evaluación del modelo a `mlops-platform/ml/training`.
 - [x] Implementar el registro del modelo entrenado (`register_model`) en el Model Registry de MLflow, bajo el nombre `PredictionMovies`.
-- [ ] Subir `TMDB_movie_dataset_v11.csv` al bucket Raw Data de MinIO (o automatizar su descarga) y completar la tarea `load_data` del DAG.
+- [x] Subir `TMDB_movie_dataset_v11.csv` al bucket Raw Data de MinIO (o automatizar su descarga) y completar la tarea `load_data` del DAG.
 - [ ] Conectar las tareas del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) con las funciones reales de `ml/` (hoy son stubs que levantan `NotImplementedError`).
 - [ ] Correr el DAG de punta a punta y confirmar que el modelo `PredictionMovies` queda registrado en MLflow.
 - [ ] Promover una primera versión del modelo a Staging en el Model Registry.
