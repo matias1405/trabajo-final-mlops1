@@ -3,7 +3,7 @@ services:
   # (datos raw, datos procesados) y el Artifact Store de MLflow.
   s3:
     restart: always
-    image: minio/minio:latest
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: minio
     ports:
       - "${MINIO_PORT}:9000"
@@ -26,7 +26,7 @@ services:
   # Job de inicialización: crea en MinIO los buckets que usa la plataforma
   # (Data Lake y Artifact Store de MLflow) y luego termina.
   s3-buckets-init:
-    image: minio/mc:latest
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: s3-buckets-init
     depends_on:
       s3:
@@ -54,14 +54,15 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - AIRFLOW_DB_NAME=${AIRFLOW_DB_NAME}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} && pg_isready -U ${POSTGRES_USER} -d ${AIRFLOW_DB_NAME}"]
       interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 60s
 
   # MLflow: administra el ciclo de vida del modelo (Experiment Tracking y
   # Model Registry). Usa Postgres como Backend Store y MinIO como Artifact
@@ -90,8 +91,25 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 15s
+
+  # airflow usa UID 50000 y GID 0
+  airflow-permissions:
+    build: ./mlops-platform/airflow
+    container_name: airflow-permissions
+    user: "0:0"
+    networks:
+      - ml-platform-network
+    volumes:
+      - ./volumes/airflow-data:/opt/airflow/data
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        chown -R 50000:0 /opt/airflow/data
+        chmod -R g+rwX /opt/airflow/data
 
   # Job de inicialización de Airflow: corre las migraciones de base de datos
   # y crea el usuario administrador. Corre una única vez y termina; los
@@ -102,6 +120,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      airflow-permissions:
+        condition: service_completed_successfully
     networks:
       - ml-platform-network
     environment: &airflow-common-env
@@ -115,21 +135,22 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
       DATALAKE_BUCKET_NAME: ${DATALAKE_BUCKET_NAME}
-      # Token de la API de Kaggle, usado por la tarea load_data para
-      # descargar el dataset la primera vez (ver .env.template).
-      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
       # Permite `from ml import ...` en los DAGs: ml/ se monta como hermano de dags/.
       PYTHONPATH: /opt/airflow
     volumes: &airflow-common-volumes
       - ./mlops-platform/dags:/opt/airflow/dags
       - ./mlops-platform/ml:/opt/airflow/ml
+      - ./dataset:/opt/airflow/dataset
       - airflow-logs:/opt/airflow/logs
       - ./volumes/airflow-data:/opt/airflow/data
-    entrypoint: >
-      /bin/bash -c "
-      airflow db migrate &&
-      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Admin --lastname Admin --role Admin --email ${AIRFLOW_ADMIN_EMAIL}
-      "
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users create --username "${AIRFLOW_ADMIN_USER}" --password "${AIRFLOW_ADMIN_PASSWORD}" --firstname Admin \
+          --lastname Admin --role Admin --email "${AIRFLOW_ADMIN_EMAIL}"
 
   # Airflow Webserver: expone la UI para inspeccionar y disparar
   # manualmente el pipeline de entrenamiento (DAG).
@@ -154,7 +175,9 @@ services:
   # -> limpieza -> feature engineering -> entrenamiento -> evaluación ->
   # registro en MLflow) según su schedule o disparos manuales.
   airflow-scheduler:
-    build: ./mlops-platform/airflow
+    build:
+      context: ./mlops-platform/airflow
+      dockerfile: Dockerfile.ml
     restart: always
     container_name: airflow-scheduler
     depends_on:

@@ -20,9 +20,8 @@ RAW_DATA_KEY = "raw/TMDB_movie_dataset_v11.csv"
 RAW_DATA_LOCAL_PATH = "/opt/airflow/data/raw/TMDB_movie_dataset_v11.csv"
 
 # Dataset original en Kaggle: https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies
-KAGGLE_DATASET = "asaniczka/tmdb-movies-dataset-2023-930k-movies"
-KAGGLE_DATASET_FILENAME = "TMDB_movie_dataset_v11.csv"
 
+LOCAL_DATASET_PATH = "/opt/airflow/dataset/TMDB_movie_dataset_v11.csv"
 
 def _build_s3_client():
     return boto3.client(
@@ -43,19 +42,6 @@ def _raw_data_exists_in_minio(s3, bucket):
         return False
 
 
-def _download_dataset_from_kaggle(destination_path):
-    # Requiere la credencial KAGGLE_API_TOKEN (ver .env.template). El paquete
-    # `kaggle` se autentica solo al importarlo (usa KAGGLE_API_TOKEN del
-    # entorno y expone el cliente ya autenticado como `kaggle.api`), así que
-    # no hay que instanciar KaggleApi() ni llamar a .authenticate() a mano:
-    # el import ya consume esa variable de entorno.
-    import kaggle
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        kaggle.api.dataset_download_files(KAGGLE_DATASET, path=tmp_dir, unzip=True)
-        shutil.copy(os.path.join(tmp_dir, KAGGLE_DATASET_FILENAME), destination_path)
-
-
 def load_data(**_):
     # Descarga el CSV original desde el bucket Raw Data de MinIO (bucket
     # `datalake`, prefijo `raw/`) a un path local compartido por los
@@ -69,10 +55,7 @@ def load_data(**_):
     s3 = _build_s3_client()
 
     if not _raw_data_exists_in_minio(s3, bucket):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            local_download_path = os.path.join(tmp_dir, KAGGLE_DATASET_FILENAME)
-            _download_dataset_from_kaggle(local_download_path)
-            s3.upload_file(local_download_path, bucket, RAW_DATA_KEY)
+        s3.upload_file(LOCAL_DATASET_PATH , bucket, RAW_DATA_KEY)
 
     s3.download_file(bucket, RAW_DATA_KEY, RAW_DATA_LOCAL_PATH)
     return RAW_DATA_LOCAL_PATH
