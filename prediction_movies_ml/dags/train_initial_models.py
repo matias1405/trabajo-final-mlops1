@@ -19,8 +19,10 @@ from airflow.operators.python import PythonOperator
 from botocore.exceptions import ClientError
 import requests
 
-import ml.v1 as v1
-import ml.v2 as v2
+import ml.v1.preprocessing as v1_preprocessing
+import ml.v1.training as v1_training
+import ml.v2.preprocessing as v2_preprocessing
+import ml.v2.training as v2_training
 
 RAW_DATA_KEY = "raw/TMDB_movie_dataset_v11.csv"
 RAW_DATA_LOCAL_PATH = "/opt/airflow/data/raw/TMDB_movie_dataset_v11.csv"
@@ -70,116 +72,93 @@ def load_data(**_):
         s3.upload_file(LOCAL_DATASET_PATH , bucket, RAW_DATA_KEY)
 
     s3.download_file(bucket, RAW_DATA_KEY, RAW_DATA_LOCAL_PATH)
-    return RAW_DATA_LOCAL_PATH
 
 
 def validate_data(**context):
-    raw_data_path = context["ti"].xcom_pull(task_ids="load_data")
-    df = pd.read_csv(raw_data_path)
-    v1.preprocessing.validate(df)
-    return raw_data_path
+    df = pd.read_csv(RAW_DATA_LOCAL_PATH)
+    v1_preprocessing.validate(df)
 
 
 def clean_data(**context):
-    raw_data_path = context["ti"].xcom_pull(task_ids="validate_data")
-    df = pd.read_csv(raw_data_path)
-    cleaned_df = ml.v1.preprocessing.clean(df)
+    df = pd.read_csv(RAW_DATA_LOCAL_PATH)
+    cleaned_df = v1_preprocessing.clean(df)
     WORKDIR.mkdir(parents=True, exist_ok=True)
     cleaned_df.to_csv(CLEAN_DATA_LOCAL_PATH, index=False)
-    return str(CLEAN_DATA_LOCAL_PATH)
 
 
-def feature_engineering_v1(**context):
-    cleaned_data_path = context["ti"].xcom_pull(task_ids="clean_data")
-    df = pd.read_csv(cleaned_data_path)
-    X_train, X_test, y_train, y_test = ml.v1.preprocessing.engineer_features(df)
+def split_v1(**context):
+    df = pd.read_csv(CLEAN_DATA_LOCAL_PATH)
+    X_train, X_test, y_train, y_test = v1_preprocessing.split(df)
     WORKDIR.mkdir(parents=True, exist_ok=True)
     X_train.to_csv(X_TRAIN_LOCAL_PATH, index=False)
     X_test.to_csv(X_TEST_LOCAL_PATH, index=False)
     y_train.to_csv(Y_TRAIN_LOCAL_PATH, index=False, header=True)
     y_test.to_csv(Y_TEST_LOCAL_PATH, index=False, header=True)
-    return str(WORKDIR)
 
 
-def feature_engineering_v2(**context):
-    cleaned_data_path = context["ti"].xcom_pull(task_ids="clean_data")
-    df = pd.read_csv(cleaned_data_path)
-    X_train, X_test, y_train, y_test = ml.v2.preprocessing.engineer_features(df)
+def split_v2(**context):
+    df = pd.read_csv(CLEAN_DATA_LOCAL_PATH)
+    X_train, X_test, y_train, y_test = v1_preprocessing.split(df)
     WORKDIR.mkdir(parents=True, exist_ok=True)
     X_train.to_csv(X_TRAIN_LOCAL_PATH, index=False)
     X_test.to_csv(X_TEST_LOCAL_PATH, index=False)
     y_train.to_csv(Y_TRAIN_LOCAL_PATH, index=False, header=True)
     y_test.to_csv(Y_TEST_LOCAL_PATH, index=False, header=True)
-    return str(WORKDIR)
 
 
 def train_model_v1(**context):
-    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering_v1"))
-    X_train = pd.read_csv(feature_dir / "X_train.csv")
-    y_train = pd.read_csv(feature_dir / "y_train.csv").squeeze("columns")
-    model = v1.training.train(X_train, y_train)
+    X_train = pd.read_csv(X_TRAIN_LOCAL_PATH)
+    y_train = pd.read_csv(Y_TRAIN_LOCAL_PATH).squeeze("columns")
+    model = v1_training.train(X_train, y_train)
     joblib.dump(model, MODEL_PRODUCTION_LOCAL_PATH)
-    return str(MODEL_PRODUCTION_LOCAL_PATH)
 
 
 def train_model_v2(**context):
-    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering_v2"))
-    X_train = pd.read_csv(feature_dir / "X_train.csv")
-    y_train = pd.read_csv(feature_dir / "y_train.csv").squeeze("columns")
-    model = v2.training.train(X_train, y_train)
+    X_train = pd.read_csv(X_TRAIN_LOCAL_PATH)
+    y_train = pd.read_csv(Y_TRAIN_LOCAL_PATH).squeeze("columns")
+    model = v2_training.train(X_train, y_train)
     joblib.dump(model, MODEL_STAGING_LOCAL_PATH)
-    return str(MODEL_STAGING_LOCAL_PATH)
 
 
 def evaluate_model_v1(**context):
-    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering_v1"))
-    model_path = context["ti"].xcom_pull(task_ids="train_model_v1")
-    model = joblib.load(model_path)
-    X_test = pd.read_csv(feature_dir / "X_test.csv")
-    y_test = pd.read_csv(feature_dir / "y_test.csv").squeeze("columns")
-    metrics = v1.training.evaluate(model, X_test, y_test)
+    model = joblib.load(str(MODEL_PRODUCTION_LOCAL_PATH))
+    X_test = pd.read_csv(X_TEST_LOCAL_PATH)
+    y_test = pd.read_csv(Y_TEST_LOCAL_PATH).squeeze("columns")
+    metrics = v1_training.evaluate(model, X_test, y_test)
     WORKDIR.mkdir(parents=True, exist_ok=True)
     with open(METRICS_PRODUCTION_LOCAL_PATH, "w", encoding="utf-8") as fh:
         json.dump(metrics, fh, indent=2)
-    return str(METRICS_PRODUCTION_LOCAL_PATH)
 
 
 def evaluate_model_v2(**context):
-    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering_v2"))
-    model_path = context["ti"].xcom_pull(task_ids="train_model_v2")
-    model = joblib.load(model_path)
-    X_test = pd.read_csv(feature_dir / "X_test.csv")
-    y_test = pd.read_csv(feature_dir / "y_test.csv").squeeze("columns")
-    metrics = v2.training.evaluate(model, X_test, y_test)
+    model = joblib.load(str(MODEL_STAGING_LOCAL_PATH))
+    X_test = pd.read_csv(X_TEST_LOCAL_PATH)
+    y_test = pd.read_csv(Y_TEST_LOCAL_PATH).squeeze("columns")
+    metrics = v2_training.evaluate(model, X_test, y_test)
     WORKDIR.mkdir(parents=True, exist_ok=True)
     with open(METRICS_STAGING_LOCAL_PATH, "w", encoding="utf-8") as fh:
         json.dump(metrics, fh, indent=2)
-    return str(METRICS_STAGING_LOCAL_PATH)
 
 
 def register_model_v1(**context):
-    model_path = context["ti"].xcom_pull(task_ids="train_model_v1")
-    metrics_path = context["ti"].xcom_pull(task_ids="evaluate_model_v1")
-    with open(metrics_path, "r", encoding="utf-8") as fh:
+    with open(METRICS_PRODUCTION_LOCAL_PATH, "r", encoding="utf-8") as fh:
         run_metrics = json.load(fh)
-    model = joblib.load(model_path)
-    return v1.training.register_model(model, run_metrics)
+    model = joblib.load(str(MODEL_PRODUCTION_LOCAL_PATH))
+    return v1_training.register_model(model, run_metrics)
 
 
 def register_model_v2(**context):
-    model_path = context["ti"].xcom_pull(task_ids="train_model_v2")
-    metrics_path = context["ti"].xcom_pull(task_ids="evaluate_model_v2")
-    with open(metrics_path, "r", encoding="utf-8") as fh:
+    with open(METRICS_STAGING_LOCAL_PATH, "r", encoding="utf-8") as fh:
         run_metrics = json.load(fh)
-    model = joblib.load(model_path)
-    return v2.training.register_model(model, run_metrics)
+    model = joblib.load(str(MODEL_STAGING_LOCAL_PATH))
+    return v2_training.register_model(model, run_metrics)
 
 
 def reload_model_v1(**context):
-    api_url = "localhost:" + os.environ["FASTAPI_PRODUCTION_PORT"]
+    api_url = "http://fastapi-production:8000/model/reload"
     reload_token = os.environ["MODEL_RELOAD_TOKEN"]
     response = requests.post(
-        f"{api_url}/model/reload",
+        api_url,
         headers={
             "Authorization": f"Bearer {reload_token}",
         },
@@ -191,10 +170,10 @@ def reload_model_v1(**context):
 
 
 def reload_model_v2(**context):
-    api_url = "localhost:" + os.environ["FASTAPI_STAGING_PORT"]
+    api_url = "http://fastapi-staging:8000/model/reload"
     reload_token = os.environ["MODEL_RELOAD_TOKEN"]
     response = requests.post(
-        f"{api_url}/model/reload",
+        api_url,
         headers={
             "Authorization": f"Bearer {reload_token}",
         },
@@ -226,7 +205,7 @@ with DAG(
     # MODELO V1
     # ==========================================
 
-    t_features_v1  = PythonOperator(task_id="feature_engineering_v1",python_callable=feature_engineering_v1)
+    t_split_v1      = PythonOperator(task_id="split_v1",python_callable=split_v1)
     t_train_v1      = PythonOperator(task_id="train_model_v1", python_callable=train_model_v1)
     t_evaluate_v1   = PythonOperator(task_id="evaluate_model_v1", python_callable=evaluate_model_v1)
     t_register_v1   = PythonOperator(task_id="register_model_v1", python_callable=register_model_v1)
@@ -236,7 +215,7 @@ with DAG(
     # MODELO V2
     # ==========================================
 
-    t_features_v2  = PythonOperator(task_id="feature_engineering_v2",python_callable=feature_engineering_v2)
+    t_split_v2      = PythonOperator(task_id="split_v2",python_callable=split_v2)
     t_train_v2      = PythonOperator(task_id="train_model_v2", python_callable=train_model_v2)
     t_evaluate_v2   = PythonOperator(task_id="evaluate_model_v2", python_callable=evaluate_model_v2)
     t_register_v2   = PythonOperator(task_id="register_model_v2", python_callable=register_model_v2)
@@ -250,9 +229,9 @@ with DAG(
         t_load
         >> t_validate
         >> t_clean
-        >> [t_features_v1, t_features_v2]
+        >> [t_split_v1, t_split_v2]
     )
 
-    t_features_v1 >> t_train_v1 >> t_evaluate_v1 >> t_register_v1 >> t_reload_v1
-    t_features_v2 >> t_train_v2 >> t_evaluate_v2 >> t_register_v2 >> t_reload_v2
+    t_split_v1 >> t_train_v1 >> t_evaluate_v1 >> t_register_v1 >> t_reload_v1
+    t_split_v2 >> t_train_v2 >> t_evaluate_v2 >> t_register_v2 >> t_reload_v2
 

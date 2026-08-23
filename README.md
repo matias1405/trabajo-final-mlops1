@@ -1,3 +1,10 @@
+## Integrantes
+
+- Gonzalo Cuervo
+- Nicolas Alberto Tonnelier
+- Marina Andrea Racciatti
+- Matías Guillermo Alfaro
+
 # ML Models and Something More Inc. - MLOps Platform
 
 Este proyecto implementa una plataforma de **MLOps** utilizando una arquitectura completamente desplegada mediante Docker Compose.
@@ -486,7 +493,7 @@ Predicción
 
 El endpoint FastAPI carga durante su inicialización el modelo registrado en MLflow con estado **Staging**.
 
-Este modelo permanece cargado en memoria hasta que el servicio es reiniciado.
+Este modelo permanece cargado en memoria hasta que el servicio es reiniciado o se ejecuta un DAG en Airflow para entrenar un nuevo modelo.
 
 ---
 
@@ -539,14 +546,14 @@ PredictionMovies v3
 
 # Promoción de modelos
 
-Una vez validado un modelo en Staging, éste puede promoverse dentro de MLflow.
+Una vez validado un modelo en Staging, éste puede promoverse manualmente ejecutando un DAG en Airflow. Airflow se encarga de enviar un POST a fastapi, para avisarle que recarge el modelo.
 
 ```
 Version 4
 
 ↓
 
-Staging
+Staging v4-RC
 
 ↓
 
@@ -554,26 +561,9 @@ Validación funcional
 
 ↓
 
-Production
+Production v4
 ```
 
-Posteriormente se reinicia el servicio FastAPI correspondiente para que cargue automáticamente la nueva versión del modelo.
-
-```mermaid
-stateDiagram-v2
-
-[*] --> Training
-
-Training --> Registered
-
-Registered --> Staging
-
-Staging --> Archived : Rechazado
-
-Staging --> Production : Aprobado
-
-Production --> Archived : Reemplazado
-```
 
 ---
 
@@ -610,48 +600,35 @@ Esta arquitectura proporciona:
 # Estructura del proyecto
 
 ```
-.
-├── airflow/
-├── dags/
-├── ml/
-│   ├── training/
-│   ├── preprocessing/
-│   └── inference/
-├── mlflow/
-├── fastapi-staging/
-├── fastapi-production/
-├── frontend-staging/
-├── frontend-production/
-├── postgres/
-├── minio/
-├── docker-compose.yml
-└── README.md
-```
-
 trabajo-final-mlops1/
 │
-├── mlops-platform/
+├── mlops-platform/                             # codigo de infraestructura
 │   ├── airflow/
 │   │   └── Dockerfile
 │   ├── mlflow/
-│   ├── minio/
-│   └── docker-compose.yml
+│   │   └── Dockerfile
+│   └── postgresql/
+│       └── Dockerfile
 │
-├── movie-ml/
+├── prediction_movies_ml/                       # codigo de modelos y datos
 │   ├── dags/
-│   │   └── prediction_movies_pipeline.py
-│   ├── preprocessing.py
-│   ├── training.py
-│   ├── evaluation.py
-│   └── inference.py
+│   │   ├── promote_model.py                    # ejecucion manual desde airflow
+│   │   └── prediction_movies_pipeline.py       # ejecucion automatica
+│   ├── dataset/
+│   │   └── # dataset
+│   └── ml/
+│       └── #codigo python de modelos por version
 │
-├── movie-api/
-│   ├── Dockerfile
+├── client-app/
 │   └── app/
-│       ├── main.py
-│       └── schemas.py
+│       ├── fastapi/                            # codigo de backend app y dockerfile
+│       └── react/                              # codigo de frontend app y dockerfile
 │
-└── movie-frontend/
+├── env.template
+├── docker-compose.yml
+├── License
+└── README.md
+```
 
 ---
 
@@ -667,17 +644,6 @@ cp .env.template .env
 
 `.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. La mayoría son credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están. El propio `.env` **no** se versiona (ver `.gitignore`) porque a partir de ahora contiene una credencial real, no solo valores demo: la API key de Kaggle.
 
-## Credenciales de Kaggle
-
-La tarea `load_data` del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) descarga `TMDB_movie_dataset_v11.csv` desde [Kaggle](https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies) y lo sube al bucket Raw Data de MinIO la primera vez que se corre el DAG (si el archivo ya está en MinIO, no se vuelve a descargar). Esto no pasa solo: hay que disparar el DAG manualmente (UI via http://localhost:8080 o `airflow dags trigger prediction_movies_pipeline`) y, si es la primera vez que corre, despausarlo antes (manualmente en la UI o `airflow dags unpause prediction_movies_pipeline`), porque todo DAG nuevo arranca pausado en Airflow. Para descargar el dataset se necesitan credenciales de la API de Kaggle:
-
-1. Crear una cuenta en [kaggle.com](https://www.kaggle.com) si no se tiene una.
-2. Ir a [kaggle.com/settings](https://www.kaggle.com/settings) → sección **API** → **Create New Token**. Esto genera un token nuevo (con prefijo `KGAT_`).
-3. Completar `KAGGLE_API_TOKEN` en el `.env` con ese valor.
-
-Importante: Kaggle ofrece dos formatos de credenciales. Este proyecto usa el **token nuevo** (`KAGGLE_API_TOKEN`), no el `kaggle.json` de las "Legacy API Credentials" (que usa un par `KAGGLE_USERNAME`/`KAGGLE_KEY`) — son mecanismos de autenticación distintos y no intercambiables entre sí.
-
-Sin esta credencial, la tarea `load_data` falla al intentar descargar el dataset desde Kaggle (a menos que el CSV ya se haya subido manualmente al bucket Raw Data).
 
 ---
 
@@ -691,7 +657,9 @@ Sin esta credencial, la tarea `load_data` falla al intentar descargar el dataset
 
 • Automated Retraining
 
-• Canary Deployments
+• Advanced Deployment Strategies
+
+• Input data control from the frontend
 
 ---
 

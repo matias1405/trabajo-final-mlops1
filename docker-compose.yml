@@ -223,11 +223,11 @@ services:
       - PYTHONPATH=/opt/mlops-platform
       - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('${FASTAPI_STAGING_PORT}/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 40
-      start_period: 60s
+      retries: 60
+      start_period: 120s
 
   # FastAPI Production: expone el modelo en estado "Production" del Model
   # Registry, consumido por los usuarios finales. Aislado en
@@ -254,11 +254,11 @@ services:
       - PYTHONPATH=/opt/mlops-platform
       - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('${FASTAPI_PRODUCTION_PORT}/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 40
-      start_period: 60s
+      retries: 60
+      start_period: 120s
 
   # Frontend Staging: aplicación cliente (React) usada por el equipo de QA
   # para probar el modelo en Staging. Solo se comunica con FastAPI Staging,

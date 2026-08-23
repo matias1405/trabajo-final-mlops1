@@ -1,11 +1,37 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from datetime import datetime
+import mlflow
+import requests
+import os
 
 def get_model():
-    print("hello world")
+    client = mlflow.MlflowClient(**context)
+    model_name = "PredictionMovies"
+    staging_model = client.get_model_version_by_alias(model_name,"staging")
+    version = staging_model.version
+    return version
 
-def promote_model():
-    print("hello world")
+
+def promote_model(**context):
+    version = context["ti"].xcom_pull(task_ids="get_model")
+    model_name = "PredictionMovies"
+    alias = "production"
+    client = mlflow.MlflowClient()
+    client.set_registered_model_alias(model_name, alias, version)
+    version_tag = f"v{version}"
+    client.set_registered_model_alias(model_name, version_tag, version)
+    client.delete_registered_model_alias(model_name,f"{version_tag}-RC")
+
+    url = "http://fastapi-production:8000/model/reload"
+    response = requests.post(
+        url,
+        headers={"X-Reload-Token": os.environ["MODEL_RELOAD_TOKEN"]},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
 
 with DAG(
     dag_id="promote-model",
