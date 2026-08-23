@@ -7,6 +7,7 @@ const initialForm = {
   budget: "10000000",
   runtime: "120",
   original_language: "en",
+  release_date: "2024-07-15",
   genres: "Action,Comedy",
   production_countries: "United States of America",
   production_companies: "Warner Bros.",
@@ -43,6 +44,7 @@ function App() {
       budget: Number(form.budget),
       runtime: Number(form.runtime),
       original_language: form.original_language.trim(),
+      release_date: form.release_date,
       genres: parseList(form.genres),
       production_countries: parseList(form.production_countries),
       production_companies: parseList(form.production_companies),
@@ -120,7 +122,16 @@ function App() {
               }
             />
           </label>
-
+          <label>
+            Release date
+            <input
+              type="date"
+              value={form.release_date}
+              onChange={(event) =>
+                setForm({ ...form, release_date: event.target.value })
+              }
+            />
+          </label>
           <label>
             Genres
             <textarea
