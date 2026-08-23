@@ -8,8 +8,12 @@ import os
 import shutil
 import tempfile
 from datetime import datetime
+from pathlib import Path
+import json
 
 import boto3
+import joblib
+import pandas as pd
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from botocore.exceptions import ClientError
@@ -18,6 +22,14 @@ from ml import preprocessing, training
 
 RAW_DATA_KEY = "raw/TMDB_movie_dataset_v11.csv"
 RAW_DATA_LOCAL_PATH = "/opt/airflow/data/raw/TMDB_movie_dataset_v11.csv"
+WORKDIR = Path("/opt/airflow/data/processed/prediction_movies")
+CLEAN_DATA_LOCAL_PATH = WORKDIR / "cleaned.csv"
+X_TRAIN_LOCAL_PATH = WORKDIR / "X_train.csv"
+X_TEST_LOCAL_PATH = WORKDIR / "X_test.csv"
+Y_TRAIN_LOCAL_PATH = WORKDIR / "y_train.csv"
+Y_TEST_LOCAL_PATH = WORKDIR / "y_test.csv"
+MODEL_LOCAL_PATH = WORKDIR / "model.joblib"
+METRICS_LOCAL_PATH = WORKDIR / "metrics.json"
 
 # Dataset original en Kaggle: https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies
 KAGGLE_DATASET = "asaniczka/tmdb-movies-dataset-2023-930k-movies"
@@ -78,28 +90,71 @@ def load_data(**_):
     return RAW_DATA_LOCAL_PATH
 
 
-def validate_data(**_):
-    return preprocessing.validate(None)
+def validate_data(**context):
+    raw_data_path = context["ti"].xcom_pull(task_ids="load_data")
+    df = pd.read_csv(raw_data_path)
+    preprocessing.validate(df)
+    return raw_data_path
 
 
-def clean_data(**_):
-    return preprocessing.clean(None)
+def clean_data(**context):
+    raw_data_path = context["ti"].xcom_pull(task_ids="validate_data")
+    df = pd.read_csv(raw_data_path)
+    cleaned_df = preprocessing.clean(df)
+    WORKDIR.mkdir(parents=True, exist_ok=True)
+    cleaned_df.to_csv(CLEAN_DATA_LOCAL_PATH, index=False)
+    return str(CLEAN_DATA_LOCAL_PATH)
 
 
-def feature_engineering(**_):
-    return preprocessing.engineer_features(None)
+def feature_engineering(**context):
+    cleaned_data_path = context["ti"].xcom_pull(task_ids="clean_data")
+    df = pd.read_csv(cleaned_data_path)
+    X_train, X_test, y_train, y_test = preprocessing.engineer_features(df)
+
+    WORKDIR.mkdir(parents=True, exist_ok=True)
+    X_train.to_csv(X_TRAIN_LOCAL_PATH, index=False)
+    X_test.to_csv(X_TEST_LOCAL_PATH, index=False)
+    y_train.to_csv(Y_TRAIN_LOCAL_PATH, index=False, header=True)
+    y_test.to_csv(Y_TEST_LOCAL_PATH, index=False, header=True)
+
+    return str(WORKDIR)
 
 
-def train_model(**_):
-    return training.train(None, None)
+def train_model(**context):
+    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering"))
+    X_train = pd.read_csv(feature_dir / "X_train.csv")
+    y_train = pd.read_csv(feature_dir / "y_train.csv").squeeze("columns")
+
+    model = training.train(X_train, y_train)
+    joblib.dump(model, MODEL_LOCAL_PATH)
+    return str(MODEL_LOCAL_PATH)
 
 
-def evaluate_model(**_):
-    return training.evaluate(None, None, None)
+def evaluate_model(**context):
+    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering"))
+    model_path = context["ti"].xcom_pull(task_ids="train_model")
+
+    model = joblib.load(model_path)
+    X_test = pd.read_csv(feature_dir / "X_test.csv")
+    y_test = pd.read_csv(feature_dir / "y_test.csv").squeeze("columns")
+    metrics = training.evaluate(model, X_test, y_test)
+
+    WORKDIR.mkdir(parents=True, exist_ok=True)
+    with open(METRICS_LOCAL_PATH, "w", encoding="utf-8") as fh:
+        json.dump(metrics, fh, indent=2)
+
+    return str(METRICS_LOCAL_PATH)
 
 
-def register_model(**_):
-    return training.register_model(None, None)
+def register_model(**context):
+    model_path = context["ti"].xcom_pull(task_ids="train_model")
+    metrics_path = context["ti"].xcom_pull(task_ids="evaluate_model")
+
+    with open(metrics_path, "r", encoding="utf-8") as fh:
+        run_metrics = json.load(fh)
+
+    model = joblib.load(model_path)
+    return training.register_model(model, run_metrics)
 
 
 with DAG(
