@@ -16,6 +16,86 @@ La solución utiliza herramientas ampliamente utilizadas en la industria:
 
 ---
 
+# Requisitos
+
+Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow, MLflow ni ninguna librería del proyecto en la máquina host. Lo único necesario es:
+
+* **Docker Engine** con el plugin **Compose V2** (comando `docker compose`, no el binario standalone `docker-compose` v1 — el `docker-compose.yml` usa `depends_on: condition: service_completed_successfully`, que la v1 no soporta).
+* **~5 GB de espacio libre en disco**: imágenes de los servicios + el dataset (`TMDB_movie_dataset_v11.csv`, ~600 MB) + los datos procesados que Airflow genera durante el entrenamiento.
+* Una **cuenta de Kaggle** con un API token generado (ver la sección "Credenciales de Kaggle" más abajo) — sin esto, la tarea `load_data` del DAG no puede descargar el dataset la primera vez.
+* Los puertos por defecto libres en el host: `9000`/`9001` (MinIO), `5050` (MLflow), `8080` (Airflow), `8001`/`8002` (FastAPI Staging/Production), `3001`/`3002` (Frontend Staging/Production). Todos son configurables desde `.env` si alguno está ocupado (ver el aviso sobre macOS y el puerto 5000 más abajo).
+
+---
+
+# Puesta en marcha
+
+1. **Configurar variables de entorno**
+
+   ```bash
+   cp .env.template .env
+   ```
+
+   Completar en el `.env` recién creado:
+   * `KAGGLE_API_TOKEN`: obligatorio para que el DAG pueda descargar el dataset (ver "Credenciales de Kaggle").
+   * `AIRFLOW_FERNET_KEY` y `AIRFLOW_SECRET_KEY`: generarlos con los comandos que indica el propio `.env.template`.
+
+   El resto de las variables (MinIO, Postgres, usuario admin de Airflow, puertos) ya vienen con valores demo utilizables tal cual para desarrollo local.
+
+2. **Levantar la plataforma**
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   `--build` es necesario la primera vez, o después de tocar algún Dockerfile/`requirements.txt`.
+
+3. **Verificar el estado de los servicios**
+
+   ```bash
+   docker compose ps
+   ```
+
+   `postgres`, `mlflow` y `s3` (MinIO) deben estar `healthy`. `fastapi-staging` y `fastapi-production`, por otro lado, pueden fallar al arrancar, reiniciar y fallar en loop, porque todavía no existe ningún modelo `PredictionMovies` registrado. Pero se resuelve en el paso 5.
+
+4. **Entrenar y registrar el primer modelo**
+
+   Entrar a la UI de Airflow en `http://localhost:${AIRFLOW_PORT}` (usuario/contraseña: `AIRFLOW_ADMIN_USER`/`AIRFLOW_ADMIN_PASSWORD` del `.env`), despausar el DAG `prediction_movies_pipeline` y dispararlo. Equivalente por CLI:
+
+   ```bash
+   docker compose exec airflow-webserver airflow dags unpause prediction_movies_pipeline
+   docker compose exec airflow-webserver airflow dags trigger prediction_movies_pipeline
+   ```
+
+   Este DAG descarga el dataset desde Kaggle (o lo toma de MinIO si ya fue subido en una corrida anterior), lo valida, limpia, genera las features, entrena, evalúa, registra el modelo en el Model Registry de MLflow y lo promueve automáticamente al alias `staging`.
+
+5. **Cargar el modelo en Staging**
+
+   Una vez que el DAG termina en `success` (visible en la UI de Airflow o en `http://localhost:${MLFLOW_PORT}`), reiniciar FastAPI Staging para que cargue el modelo recién promovido (por diseño no hay hot-reload: el modelo se carga una única vez al iniciar el servicio):
+
+   ```bash
+   docker compose restart fastapi-staging
+   ```
+
+   Probar el modelo desde el frontend en `http://localhost:${FRONTEND_STAGING_PORT}`.
+
+6. **Promover a Production**
+
+   Validado el modelo en Staging, promoverlo disparando el segundo DAG:
+
+   ```bash
+   docker compose exec airflow-webserver airflow dags trigger promote_model_to_production
+   ```
+
+   y reiniciar FastAPI Production para que lo cargue:
+
+   ```bash
+   docker compose restart fastapi-production
+   ```
+
+   Probar desde `http://localhost:${FRONTEND_PRODUCTION_PORT}`.
+
+---
+
 # Objetivos
 
 La plataforma permite:

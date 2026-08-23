@@ -54,6 +54,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - AIRFLOW_DB_NAME=${AIRFLOW_DB_NAME}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -115,6 +116,7 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
       DATALAKE_BUCKET_NAME: ${DATALAKE_BUCKET_NAME}
+      MODEL_NAME: ${MODEL_NAME}
       # Token de la API de Kaggle, usado por la tarea load_data para
       # descargar el dataset la primera vez (ver .env.template).
       KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}

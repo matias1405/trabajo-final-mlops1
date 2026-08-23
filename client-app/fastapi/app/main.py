@@ -40,6 +40,7 @@ app.add_middleware(
 )
 
 model = None
+encoder = None
 
 
 class PredictionRequest(BaseModel):
@@ -53,8 +54,14 @@ class PredictionRequest(BaseModel):
 
 @app.on_event("startup")
 def load_model() -> None:
-    global model
+    global model, encoder
     model = inference.load_model(
+        MODEL_NAME,
+        alias=MODEL_ALIAS,
+        stage=MODEL_STAGE,
+        tracking_uri=MLFLOW_TRACKING_URI,
+    )
+    encoder = inference.load_encoder(
         MODEL_NAME,
         alias=MODEL_ALIAS,
         stage=MODEL_STAGE,
@@ -64,9 +71,10 @@ def load_model() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model_ref": MODEL_REF, "model_loaded": model is not None}
+    loaded = model is not None and encoder is not None
+    return {"status": "ok", "model_ref": MODEL_REF, "model_loaded": loaded}
 
 
 @app.post("/predict")
 def predict(request: PredictionRequest) -> dict:
-    return inference.predict(model, request.model_dump())
+    return inference.predict(model, encoder, request.model_dump())

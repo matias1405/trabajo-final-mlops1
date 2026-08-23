@@ -30,6 +30,8 @@ Y_TRAIN_LOCAL_PATH = WORKDIR / "y_train.csv"
 Y_TEST_LOCAL_PATH = WORKDIR / "y_test.csv"
 MODEL_LOCAL_PATH = WORKDIR / "model.joblib"
 METRICS_LOCAL_PATH = WORKDIR / "metrics.json"
+ENCODER_LOCAL_PATH = WORKDIR / "encoder.joblib"
+MODEL_NAME = os.environ.get("MODEL_NAME", "PredictionMovies")
 
 # Dataset original en Kaggle: https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies
 KAGGLE_DATASET = "asaniczka/tmdb-movies-dataset-2023-930k-movies"
@@ -109,13 +111,14 @@ def clean_data(**context):
 def feature_engineering(**context):
     cleaned_data_path = context["ti"].xcom_pull(task_ids="clean_data")
     df = pd.read_csv(cleaned_data_path)
-    X_train, X_test, y_train, y_test = preprocessing.engineer_features(df)
+    X_train, X_test, y_train, y_test, encoder = preprocessing.engineer_features(df)
 
     WORKDIR.mkdir(parents=True, exist_ok=True)
     X_train.to_csv(X_TRAIN_LOCAL_PATH, index=False)
     X_test.to_csv(X_TEST_LOCAL_PATH, index=False)
     y_train.to_csv(Y_TRAIN_LOCAL_PATH, index=False, header=True)
     y_test.to_csv(Y_TEST_LOCAL_PATH, index=False, header=True)
+    joblib.dump(encoder, ENCODER_LOCAL_PATH)
 
     return str(WORKDIR)
 
@@ -149,12 +152,23 @@ def evaluate_model(**context):
 def register_model(**context):
     model_path = context["ti"].xcom_pull(task_ids="train_model")
     metrics_path = context["ti"].xcom_pull(task_ids="evaluate_model")
+    feature_dir = Path(context["ti"].xcom_pull(task_ids="feature_engineering"))
 
     with open(metrics_path, "r", encoding="utf-8") as fh:
         run_metrics = json.load(fh)
 
     model = joblib.load(model_path)
-    return training.register_model(model, run_metrics)
+    encoder = joblib.load(feature_dir / "encoder.joblib")
+    return training.register_model(model, run_metrics, encoder, model_name=MODEL_NAME)
+
+
+def promote_to_staging(**context):
+    # Toda versión recién entrenada entra al Registry sin alias asignado
+    # (register_model no la promueve a ningún lado): se aterriza en Staging
+    # para que el equipo de QA la valide desde el frontend correspondiente
+    # antes de que alguien la promueva a Production (ver dags/promote_model.py).
+    version = context["ti"].xcom_pull(task_ids="register_model")
+    training.promote_model(MODEL_NAME, version, "staging")
 
 
 with DAG(
@@ -172,5 +186,6 @@ with DAG(
     t_train = PythonOperator(task_id="train_model", python_callable=train_model)
     t_evaluate = PythonOperator(task_id="evaluate_model", python_callable=evaluate_model)
     t_register = PythonOperator(task_id="register_model", python_callable=register_model)
+    t_promote_staging = PythonOperator(task_id="promote_to_staging", python_callable=promote_to_staging)
 
-    t_load >> t_validate >> t_clean >> t_features >> t_train >> t_evaluate >> t_register
+    t_load >> t_validate >> t_clean >> t_features >> t_train >> t_evaluate >> t_register >> t_promote_staging
