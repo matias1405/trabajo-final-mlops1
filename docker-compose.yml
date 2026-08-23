@@ -117,14 +117,14 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
       DATALAKE_BUCKET_NAME: ${DATALAKE_BUCKET_NAME}
       MODEL_NAME: ${MODEL_NAME}
-      # Token de la API de Kaggle, usado por la tarea load_data para
-      # descargar el dataset la primera vez (ver .env.template).
-      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
       # Permite `from ml import ...` en los DAGs: ml/ se monta como hermano de dags/.
       PYTHONPATH: /opt/airflow
     volumes: &airflow-common-volumes
       - ./mlops-platform/dags:/opt/airflow/dags
       - ./mlops-platform/ml:/opt/airflow/ml
+      # Dataset versionado con Git LFS: lo sube load_data a MinIO la primera
+      # vez que corre el DAG (ver mlops-platform/dags/prediction_movies_pipeline.py).
+      - ./mlops-platform/dataset:/opt/airflow/dataset
       - airflow-logs:/opt/airflow/logs
       - ./volumes/airflow-data:/opt/airflow/data
     entrypoint: >

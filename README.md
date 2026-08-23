@@ -21,8 +21,8 @@ La solución utiliza herramientas ampliamente utilizadas en la industria:
 Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow, MLflow ni ninguna librería del proyecto en la máquina host. Lo único necesario es:
 
 * **Docker Engine** con el plugin **Compose V2** (comando `docker compose`, no el binario standalone `docker-compose` v1 — el `docker-compose.yml` usa `depends_on: condition: service_completed_successfully`, que la v1 no soporta).
+* **[Git LFS](https://git-lfs.com/)** instalado (`git lfs install`, una única vez por máquina) — `TMDB_movie_dataset_v11.csv` está versionado en el repo con LFS (ver "Dataset" más abajo); sin esto, al clonar sólo se obtiene un puntero de texto en vez del CSV real.
 * **~5 GB de espacio libre en disco**: imágenes de los servicios + el dataset (`TMDB_movie_dataset_v11.csv`, ~600 MB) + los datos procesados que Airflow genera durante el entrenamiento.
-* Una **cuenta de Kaggle** con un API token generado (ver la sección "Credenciales de Kaggle" más abajo) — sin esto, la tarea `load_data` del DAG no puede descargar el dataset la primera vez.
 * Los puertos por defecto libres en el host: `9000`/`9001` (MinIO), `5050` (MLflow), `8080` (Airflow), `8001`/`8002` (FastAPI Staging/Production), `3001`/`3002` (Frontend Staging/Production). Todos son configurables desde `.env` si alguno está ocupado (ver el aviso sobre macOS y el puerto 5000 más abajo).
 
 ---
@@ -35,9 +35,7 @@ Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow,
    cp .env.template .env
    ```
 
-   Completar en el `.env` recién creado:
-   * `KAGGLE_API_TOKEN`: obligatorio para que el DAG pueda descargar el dataset (ver "Credenciales de Kaggle").
-   * `AIRFLOW_FERNET_KEY` y `AIRFLOW_SECRET_KEY`: generarlos con los comandos que indica el propio `.env.template`.
+   Completar en el `.env` recién creado `AIRFLOW_FERNET_KEY` y `AIRFLOW_SECRET_KEY`, generándolos con los comandos que indica el propio `.env.template`.
 
    El resto de las variables (MinIO, Postgres, usuario admin de Airflow, puertos) ya vienen con valores demo utilizables tal cual para desarrollo local.
 
@@ -66,7 +64,7 @@ Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow,
    docker compose exec airflow-webserver airflow dags trigger prediction_movies_pipeline
    ```
 
-   Este DAG descarga el dataset desde Kaggle (o lo toma de MinIO si ya fue subido en una corrida anterior), lo valida, limpia, genera las features, entrena, evalúa, registra el modelo en el Model Registry de MLflow y lo promueve automáticamente al alias `staging`.
+   Este DAG sube el dataset versionado en el repo (`mlops-platform/dataset/`) al bucket Raw Data de MinIO si todavía no está ahí (o lo toma de MinIO directamente si ya fue subido en una corrida anterior), lo valida, limpia, genera las features, entrena, evalúa, registra el modelo en el Model Registry de MLflow y lo promueve automáticamente al alias `staging`.
 
 5. **Cargar el modelo en Staging**
 
@@ -720,19 +718,13 @@ La plataforma se configura mediante un archivo `.env` en la raíz del repositori
 cp .env.template .env
 ```
 
-`.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. La mayoría son credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están. El propio `.env` **no** se versiona (ver `.gitignore`) porque a partir de ahora contiene una credencial real, no solo valores demo: la API key de Kaggle.
+`.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. Son todas credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están.
 
-## Credenciales de Kaggle
+## Dataset
 
-La tarea `load_data` del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) descarga `TMDB_movie_dataset_v11.csv` desde [Kaggle](https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies) y lo sube al bucket Raw Data de MinIO la primera vez que se corre el DAG (si el archivo ya está en MinIO, no se vuelve a descargar). Esto no pasa solo: hay que disparar el DAG manualmente (UI via http://localhost:8080 o `airflow dags trigger prediction_movies_pipeline`) y, si es la primera vez que corre, despausarlo antes (manualmente en la UI o `airflow dags unpause prediction_movies_pipeline`), porque todo DAG nuevo arranca pausado en Airflow. Para descargar el dataset se necesitan credenciales de la API de Kaggle:
+`TMDB_movie_dataset_v11.csv` está versionado directamente en el repositorio, en `mlops-platform/dataset/`, usando [Git LFS](https://git-lfs.com/) (pesa ~600MB, demasiado para versionarlo como blob normal de git). Por eso hace falta tener `git-lfs` instalado (`git lfs install`, una única vez por máquina) **antes** de clonar o hacer `git pull` — si el archivo aparece como un texto corto tipo `version https://git-lfs.github.com/spec/v1 ...` en vez del CSV real, es que faltó ese paso: correr `git lfs pull` para traer el contenido real.
 
-1. Crear una cuenta en [kaggle.com](https://www.kaggle.com) si no se tiene una.
-2. Ir a [kaggle.com/settings](https://www.kaggle.com/settings) → sección **API** → **Create New Token**. Esto genera un token nuevo (con prefijo `KGAT_`).
-3. Completar `KAGGLE_API_TOKEN` en el `.env` con ese valor.
-
-Importante: Kaggle ofrece dos formatos de credenciales. Este proyecto usa el **token nuevo** (`KAGGLE_API_TOKEN`), no el `kaggle.json` de las "Legacy API Credentials" (que usa un par `KAGGLE_USERNAME`/`KAGGLE_KEY`) — son mecanismos de autenticación distintos y no intercambiables entre sí.
-
-Sin esta credencial, la tarea `load_data` falla al intentar descargar el dataset desde Kaggle (a menos que el CSV ya se haya subido manualmente al bucket Raw Data).
+La tarea `load_data` del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) sube ese archivo al bucket Raw Data de MinIO la primera vez que se corre el DAG (si el archivo ya está en MinIO, no lo vuelve a subir). Esto no pasa solo: hay que disparar el DAG manualmente (UI via http://localhost:8080 o `airflow dags trigger prediction_movies_pipeline`) y, si es la primera vez que corre, despausarlo antes (manualmente en la UI o `airflow dags unpause prediction_movies_pipeline`), porque todo DAG nuevo arranca pausado en Airflow.
 
 ---
 
