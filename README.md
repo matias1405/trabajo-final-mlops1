@@ -77,6 +77,8 @@ Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow,
 
    ![Promover staging](./dag-promote-staging.jpeg)
 
+   Nota: la carga del dataset demanda uso intensivo de memoria, y dependiendo de su configuración local, este paso puede exceder los recursos disponibles para Docker generando un Out of Memory error. Si encuentra este problema trabaje con un dataset más chico. Por ejemplo, puede recortar la cantidad de files del presente dataset con el comando `head -n 1000 dataset/TMDB_movie_dataset_v11.csv > dataset/TMDB_movie_dataset_v11.csv`.
+
 4. **Cargar el modelo en Staging**
 
    Una vez que el DAG termina en `success` (todo verde en la UI de Airflow o `http://localhost:${MLFLOW_PORT}`), reiniciar FastAPI Staging para que cargue el modelo recién promovido:
