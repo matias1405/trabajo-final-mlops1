@@ -157,11 +157,13 @@ def engineer_features(df):
     # crear variable target
     df["profitable"] = (df["revenue"] >= df["budget"]).astype(int)
 
-    # extraer mes de lanzamiento
+    # extraer mes de lanzamiento y eliminar columnas no predictoras
     df["release_month"] = pd.to_datetime(df["release_date"]).dt.month
+    df = df.drop(columns=["id", "adult", "release_date"])
 
-    # separar variables predictoras y target
-    X = df.drop(columns=["profitable"])
+    # separar variables predictoras y target; dejamos solo features numéricas
+    # para evitar que columnas textuales del dataset original lleguen al modelo.
+    X = df.drop(columns=["profitable"]).select_dtypes(include=["number", "bool"])
     y = df["profitable"]
 
     # separar en train y test

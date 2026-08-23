@@ -205,15 +205,18 @@ services:
     networks:
       - staging-network
       - ml-platform-network
+    volumes:
+      - ./mlops-platform:/opt/mlops-platform
     ports:
       - "${FASTAPI_STAGING_PORT}:8000"
     environment:
       - MODEL_NAME=${MODEL_NAME}
-      - MODEL_STAGE=Staging
+      - MODEL_ALIAS=staging
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
+      - PYTHONPATH=/opt/mlops-platform
 
   # FastAPI Production: expone el modelo en estado "Production" del Model
   # Registry, consumido por los usuarios finales. Aislado en
@@ -228,15 +231,18 @@ services:
     networks:
       - production-network
       - ml-platform-network
+    volumes:
+      - ./mlops-platform:/opt/mlops-platform
     ports:
       - "${FASTAPI_PRODUCTION_PORT}:8000"
     environment:
       - MODEL_NAME=${MODEL_NAME}
-      - MODEL_STAGE=Production
+      - MODEL_ALIAS=production
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
+      - PYTHONPATH=/opt/mlops-platform
 
   # Frontend Staging: aplicación cliente (React) usada por el equipo de QA
   # para probar el modelo en Staging. Solo se comunica con FastAPI Staging,

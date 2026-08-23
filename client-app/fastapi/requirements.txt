@@ -5,3 +5,6 @@ numpy==2.2.1
 pandas==2.2.3
 boto3==1.35.99
 pydantic==2.10.4
+scikit-learn==1.8.0
+pyarrow==18.1.0
+psutil==6.1.0
