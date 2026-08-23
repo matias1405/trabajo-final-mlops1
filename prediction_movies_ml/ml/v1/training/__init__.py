@@ -153,5 +153,5 @@ def register_model(model, run_metrics, model_name="PredictionMovies", alias="pro
         client = mlflow.MlflowClient()
         client.set_registered_model_alias(model_name, alias, version)
         version_tag = f"v{version}"
-        client.set_registered_model_alias(model_name, version_tag, version)
+        client.set_model_version_tag(model_name,version,"release",version_tag)
     return version

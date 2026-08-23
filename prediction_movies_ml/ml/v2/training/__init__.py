@@ -140,7 +140,7 @@ def evaluate(model, x_test, y_test):
     }
 
 
-def register_model(model, run_metrics, model_name="PredictionMovies", alias="production"):
+def register_model(model, run_metrics, model_name="PredictionMovies", alias="staging"):
     with mlflow.start_run():
         mlflow.log_metrics(run_metrics)
         model_info = mlflow.sklearn.log_model(
@@ -152,5 +152,5 @@ def register_model(model, run_metrics, model_name="PredictionMovies", alias="pro
         client = mlflow.MlflowClient()
         client.set_registered_model_alias(model_name, alias, version)
         version_tag = f"v{version}-RC"
-        client.set_registered_model_alias(model_name, version_tag, version)
+        client.set_model_version_tag(model_name,version,"release",version_tag)
     return version

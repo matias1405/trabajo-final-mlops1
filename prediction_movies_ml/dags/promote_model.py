@@ -20,8 +20,7 @@ def promote_model(**context):
     client = mlflow.MlflowClient()
     client.set_registered_model_alias(model_name, alias, version)
     version_tag = f"v{version}"
-    client.set_registered_model_alias(model_name, version_tag, version)
-    client.delete_registered_model_alias(model_name,f"{version_tag}-RC")
+    client.set_model_version_tag(model_name,version,"release",version_tag)
 
     url = "http://fastapi-production:8000/model/reload"
     response = requests.post(

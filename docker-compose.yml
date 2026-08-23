@@ -202,7 +202,9 @@ services:
   # antes de promoverla a Production. Solo accesible desde staging-network,
   # más un enlace a ml-platform-network para consultar/descargar el modelo.
   fastapi-staging:
-    build: ./client-app/fastapi
+    build:
+      context: .
+      dockerfile: ./client-app/fastapi/Dockerfile
     restart: always
     container_name: fastapi-staging
     depends_on:
@@ -223,17 +225,19 @@ services:
       - PYTHONPATH=/opt/mlops-platform
       - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 60
+      retries: 100
       start_period: 120s
 
   # FastAPI Production: expone el modelo en estado "Production" del Model
   # Registry, consumido por los usuarios finales. Aislado en
   # production-network; nunca comparte red con Staging.
   fastapi-production:
-    build: ./client-app/fastapi
+    build:
+      context: .
+      dockerfile: ./client-app/fastapi/Dockerfile
     restart: always
     container_name: fastapi-production
     depends_on:
@@ -254,10 +258,10 @@ services:
       - PYTHONPATH=/opt/mlops-platform
       - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 60
+      retries: 100
       start_period: 120s
 
   # Frontend Staging: aplicación cliente (React) usada por el equipo de QA

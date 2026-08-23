@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prediction-movies-ml"
+version = "1.0.0"
+description = "Modelos ML para predicción de rentabilidad de películas"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+where = ["."]

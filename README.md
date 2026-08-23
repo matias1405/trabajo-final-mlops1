@@ -38,6 +38,86 @@ La plataforma permite:
 
 ---
 
+# Recorrido por Demo de MLOps Platform
+
+La demo implementa una plataforma MLOps completa para el entrenamiento,
+registro, versionado, validación y despliegue de modelos de predicción de
+rentabilidad de películas.
+
+### 1. Levantar la plataforma
+
+Antes de iniciar la demo, verificar que Docker y Docker Compose estén
+disponibles.
+
+Las credenciales y parámetros de configuración de la plataforma se encuentran
+en el archivo `.env`.
+
+Para levantar todos los servicios ejecutar desde la raíz del proyecto:
+
+sudo docker compose up -d
+
+El primer inicio puede demorar aproximadamente **10 a 15 minutos**, ya que
+Docker debe construir las imágenes, crear e inicializar los servicios,
+configurar las dependencias entre ellos y ejecutar el pipeline inicial de
+entrenamiento. Si los servicios de fastapi fallan por healthy, por favor subir 
+los reintentos de ese servicio en docker compose.
+
+### 2. — Verificar Airflow
+
+http://localhost:8080/home
+
+Ingresar a Airflow y revisar el DAG de entrenamiento inicial.
+
+Verificar que las tareas hayan finalizado correctamente.
+
+### 3. Revisar MLflow
+
+http://localhost:5050
+
+Ingresar a MLflow y abrir el modelo:
+
+PredictionMovies
+
+Verificar las versiones, métricas y aliases registrados.
+
+### 4. Revisar MinIO
+
+http://localhost:9001/
+
+Ingresar a la consola de MinIO y comprobar los buckets y artefactos generados.
+
+### 5. Probar Staging
+
+http://localhost:3001
+
+Ingresar al frontend de Staging y realizar algunas predicciones.
+
+El frontend utilizará el modelo asociado al alias: staging
+
+### 6. Probar Production
+
+http://localhost:3002
+
+Ingresar al frontend de Production y realizar algunas predicciones.
+
+El frontend utilizará el modelo asociado al alias: production
+
+### 7. Promover el modelo
+
+Desde Airflow ejecutar manualmente el DAG:
+
+promote-model
+
+Este DAG obtiene el modelo de Staging, lo promociona a Production y solicita
+a FastAPI Production que recargue el modelo. 
+
+### 8. Revisar nueva modelo en Production
+
+Finalmente, ingresar al frontend de Production y realizar una predicción.
+
+La aplicación utilizará la nueva versión del modelo sin necesidad de
+reconstruir ni reiniciar el contenedor de FastAPI.
+
 # Arquitectura
 
 La solución se divide en tres dominios independientes.
@@ -278,7 +358,7 @@ FLOW --> MINIO
 
 MinIO simula un servicio Amazon S3.
 
-Se utiliza para almacenar tres buckets independientes.
+Se utiliza para almacenar 2 buckets independientes.
 
 ### Raw Data
 
@@ -286,13 +366,6 @@ Contiene el dataset original: TMDB_movie_dataset_v11.csv
 
 Estos datos nunca son modificados.
 
----
-
-### Processed Data
-
-Contiene los datasets generados durante el proceso de limpieza y feature engineering.
-
-Estos datos permiten reproducir exactamente un entrenamiento realizado anteriormente.
 
 ---
 
@@ -303,10 +376,8 @@ Es utilizado por MLflow como Artifact Store.
 Aquí se almacenan:
 
 * modelos entrenados;
-* pipelines de preprocesamiento;
 * matrices de confusión;
 * métricas;
-* cualquier artefacto generado durante el entrenamiento.
 
 ---
 

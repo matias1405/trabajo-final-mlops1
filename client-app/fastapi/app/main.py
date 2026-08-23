@@ -8,7 +8,7 @@ vieja API de stages.
 import os
 
 import mlflow
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
@@ -61,7 +61,7 @@ def load_model():
 
 
 @app.get("/health")
-def health(response):
+def health(response: Response):
     if model is None:
         response.status_code = 503
 
