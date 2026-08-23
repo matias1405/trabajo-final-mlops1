@@ -6,3 +6,4 @@ lightgbm==4.6.0
 catboost==1.2.10
 apache-airflow-providers-amazon==9.1.0
 apache-airflow-providers-postgres==5.14.0
+requests==2.34.2

@@ -130,6 +130,7 @@ services:
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__LOGGING__WORKER_LOG_SERVER_PORT: "8793"
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: http://s3:9000
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
@@ -138,9 +139,9 @@ services:
       # Permite `from ml import ...` en los DAGs: ml/ se monta como hermano de dags/.
       PYTHONPATH: /opt/airflow
     volumes: &airflow-common-volumes
-      - ./mlops-platform/dags:/opt/airflow/dags
-      - ./mlops-platform/ml:/opt/airflow/ml
-      - ./dataset:/opt/airflow/dataset
+      - ./prediction_movies_ml/dags:/opt/airflow/dags
+      - ./prediction_movies_ml/ml:/opt/airflow/ml
+      - ./prediction_movies_ml/dataset:/opt/airflow/dataset
       - airflow-logs:/opt/airflow/logs
       - ./volumes/airflow-data:/opt/airflow/data
     command:
@@ -187,7 +188,12 @@ services:
         condition: service_healthy
     networks:
       - ml-platform-network
-    environment: *airflow-common-env
+    environment: 
+      <<: *airflow-common-env
+      MODEL_RELOAD_TOKEN: ${MODEL_RELOAD_TOKEN}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      FASTAPI_STAGING_PORT: ${FASTAPI_STAGING_PORT}
+      FASTAPI_PRODUCTION_PORT: ${FASTAPI_PRODUCTION_PORT}
     volumes: *airflow-common-volumes
     command: scheduler
 
@@ -205,8 +211,6 @@ services:
     networks:
       - staging-network
       - ml-platform-network
-    volumes:
-      - ./mlops-platform:/opt/mlops-platform
     ports:
       - "${FASTAPI_STAGING_PORT}:8000"
     environment:
@@ -217,6 +221,13 @@ services:
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
       - PYTHONPATH=/opt/mlops-platform
+      - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('${FASTAPI_STAGING_PORT}/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
 
   # FastAPI Production: expone el modelo en estado "Production" del Model
   # Registry, consumido por los usuarios finales. Aislado en
@@ -231,8 +242,6 @@ services:
     networks:
       - production-network
       - ml-platform-network
-    volumes:
-      - ./mlops-platform:/opt/mlops-platform
     ports:
       - "${FASTAPI_PRODUCTION_PORT}:8000"
     environment:
@@ -243,6 +252,13 @@ services:
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
       - PYTHONPATH=/opt/mlops-platform
+      - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('${FASTAPI_PRODUCTION_PORT}/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
 
   # Frontend Staging: aplicación cliente (React) usada por el equipo de QA
   # para probar el modelo en Staging. Solo se comunica con FastAPI Staging,
@@ -255,7 +271,8 @@ services:
     restart: always
     container_name: frontend-staging
     depends_on:
-      - fastapi-staging
+      fastapi-staging:
+        condition: service_healthy
     networks:
       - staging-network
     ports:
@@ -271,7 +288,8 @@ services:
     restart: always
     container_name: frontend-production
     depends_on:
-      - fastapi-production
+      fastapi-production:
+        condition: service_healthy
     networks:
       - production-network
     ports:

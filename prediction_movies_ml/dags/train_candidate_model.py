@@ -17,8 +17,9 @@ import pandas as pd
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from botocore.exceptions import ClientError
+import requests
 
-from ml import preprocessing, training
+from ml.v2 import preprocessing, training
 
 RAW_DATA_KEY = "raw/TMDB_movie_dataset_v11.csv"
 RAW_DATA_LOCAL_PATH = "/opt/airflow/data/raw/TMDB_movie_dataset_v11.csv"
@@ -30,9 +31,6 @@ Y_TRAIN_LOCAL_PATH = WORKDIR / "y_train.csv"
 Y_TEST_LOCAL_PATH = WORKDIR / "y_test.csv"
 MODEL_LOCAL_PATH = WORKDIR / "model.joblib"
 METRICS_LOCAL_PATH = WORKDIR / "metrics.json"
-
-# Dataset original en Kaggle: https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies
-
 LOCAL_DATASET_PATH = "/opt/airflow/dataset/TMDB_movie_dataset_v11.csv"
 
 def _build_s3_client():
@@ -58,10 +56,9 @@ def load_data(**_):
     # Descarga el CSV original desde el bucket Raw Data de MinIO (bucket
     # `datalake`, prefijo `raw/`) a un path local compartido por los
     # contenedores de Airflow. Si todavía no está en MinIO, primero lo
-    # descarga de Kaggle y lo sube (automatiza el paso manual de subir el
-    # dataset). Se devuelve el path (no el DataFrame) por XCom: el archivo
-    # pesa ~600MB y no es viable pasarlo por el backend store de Airflow
-    # (Postgres).
+    # lo sube desde un volumen montado. Se devuelve el path (no el DataFrame)
+    # por XCom: el archivo pesa ~600MB y no es viable pasarlo por el backend
+    # store de Airflow(Postgres).
     os.makedirs(os.path.dirname(RAW_DATA_LOCAL_PATH), exist_ok=True)
     bucket = os.environ["DATALAKE_BUCKET_NAME"]
     s3 = _build_s3_client()
@@ -140,11 +137,25 @@ def register_model(**context):
     return training.register_model(model, run_metrics)
 
 
+def reload_model(**_):
+    api_url = "localhost:" + os.environ["FASTAPI_STAGING_PORT"]
+    reload_token = os.environ["MODEL_RELOAD_TOKEN"]
+    response = requests.post(
+        f"{api_url}/model/reload",
+        headers={
+            "Authorization": f"Bearer {reload_token}",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    print("Model reload requested successfully")
+    print(response.json())
+
+
 with DAG(
-    dag_id="prediction_movies_pipeline",
-    description="Entrena y registra el modelo de rentabilidad de películas",
-    schedule=None,
-    start_date=datetime(2024, 1, 1),
+    dag_id="train-model-prediction-movies-v2",
+    description="Entrena y registra el modelo de rentabilidad de películas v2",
+    schedule=@once,
     catchup=False,
     tags=["mlops-tp", "prediction-movies"],
 ) as dag:
@@ -155,5 +166,6 @@ with DAG(
     t_train = PythonOperator(task_id="train_model", python_callable=train_model)
     t_evaluate = PythonOperator(task_id="evaluate_model", python_callable=evaluate_model)
     t_register = PythonOperator(task_id="register_model", python_callable=register_model)
+    t_reload = PythonOperator(task_id="reload_model", python_callable=reload_model)
 
-    t_load >> t_validate >> t_clean >> t_features >> t_train >> t_evaluate >> t_register
+    t_load >> t_validate >> t_clean >> t_features >> t_train >> t_evaluate >> t_register >> t_reload

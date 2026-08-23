@@ -628,6 +628,31 @@ Esta arquitectura proporciona:
 └── README.md
 ```
 
+trabajo-final-mlops1/
+│
+├── mlops-platform/
+│   ├── airflow/
+│   │   └── Dockerfile
+│   ├── mlflow/
+│   ├── minio/
+│   └── docker-compose.yml
+│
+├── movie-ml/
+│   ├── dags/
+│   │   └── prediction_movies_pipeline.py
+│   ├── preprocessing.py
+│   ├── training.py
+│   ├── evaluation.py
+│   └── inference.py
+│
+├── movie-api/
+│   ├── Dockerfile
+│   └── app/
+│       ├── main.py
+│       └── schemas.py
+│
+└── movie-frontend/
+
 ---
 
 # Configuración

@@ -12,16 +12,11 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from .models import create_random_forest, create_svm
+from .models import create_model
 
 
-def train(x_train, y_train, model_version="v1"):
-    if model_version == "v1":
-        model = create_random_forest()
-    elif model_version == "v2-rc":
-        model = create_svm()
-    else:
-        raise ValueError(f"Versión de modelo no soportada: {model_version}")
+def train(x_train, y_train):
+    model = create_model()
 
     model.fit(x_train, y_train)
 
