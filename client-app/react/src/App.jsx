@@ -172,12 +172,14 @@ function App() {
             <div className="feedback feedback--success">
               <div>
                 <span>Predicción</span>
-                <strong>{String(result.prediction)}</strong>
+                <strong>
+                  {result.prediction === 1 ? "Rentable" : "No rentable"}
+                </strong>
               </div>
               {typeof result.probability === "number" ? (
                 <div>
-                  <span>Probability</span>
-                  <strong>{result.probability.toFixed(2)}</strong>
+                  <span>Probabilidad de Rentabilidad</span>
+                  <strong>{(result.probability * 100).toFixed(2)}%</strong>
                 </div>
               ) : null}
             </div>

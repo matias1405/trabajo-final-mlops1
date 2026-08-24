@@ -5,8 +5,8 @@ import mlflow
 import requests
 import os
 
-def get_model():
-    client = mlflow.MlflowClient(**context)
+def get_model(**context):
+    client = mlflow.MlflowClient()
     model_name = "PredictionMovies"
     staging_model = client.get_model_version_by_alias(model_name,"staging")
     version = staging_model.version
@@ -22,10 +22,13 @@ def promote_model(**context):
     version_tag = f"v{version}"
     client.set_model_version_tag(model_name,version,"release",version_tag)
 
-    url = "http://fastapi-production:8000/model/reload"
+    api_url = "http://fastapi-production:8000/model/reload"
+    reload_token = os.environ["MODEL_RELOAD_TOKEN"]
     response = requests.post(
-        url,
-        headers={"X-Reload-Token": os.environ["MODEL_RELOAD_TOKEN"]},
+        api_url,
+        headers={
+            "Authorization": f"Bearer {reload_token}",
+        },
         timeout=30,
     )
     response.raise_for_status()
