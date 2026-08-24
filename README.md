@@ -1,10 +1,3 @@
-## Integrantes
-
-- Gonzalo Cuervo
-- Nicolas Alberto Tonnelier
-- Marina Andrea Racciatti
-- Matías Guillermo Alfaro
-
 # ML Models and Something More Inc. - MLOps Platform
 
 Este proyecto implementa una plataforma de **MLOps** utilizando una arquitectura completamente desplegada mediante Docker Compose.
@@ -20,6 +13,15 @@ La solución utiliza herramientas ampliamente utilizadas en la industria:
 * FastAPI para exponer los modelos mediante una REST API.
 * React para el Frontend de la app cliente.
 * Docker Compose para orquestar toda la plataforma.
+
+---
+
+# Integrantes:
+
+- Matías Guillermo Alfaro
+- Gonzalo Cuervo
+- Nicolas Alberto Tonnelier
+- Marina Andrea Racciatti
 
 ---
 
@@ -44,13 +46,27 @@ La demo implementa una plataforma MLOps completa para el entrenamiento,
 registro, versionado, validación y despliegue de modelos de predicción de
 rentabilidad de películas.
 
+
+# Requisitos
+
+Todo corre dentro de contenedores: no hace falta instalar Python, Node, Airflow, MLflow ni ninguna librería del proyecto en la máquina host. Lo único necesario es:
+
+* **Docker Engine** con el plugin **Compose V2** (comando `docker compose`, no el binario standalone `docker-compose` v1 — el `docker-compose.yml` usa `depends_on: condition: service_completed_successfully`, que la v1 no soporta).
+* **[Git LFS](https://git-lfs.com/)** instalado (`git lfs install`, una única vez por máquina) — `TMDB_movie_dataset_v11.csv` está versionado en el repo con LFS (ver "Dataset" más abajo); sin esto, al clonar sólo se obtiene un puntero de texto en vez del CSV real.
+* **~5 GB de espacio libre en disco**: imágenes de los servicios + el dataset (`TMDB_movie_dataset_v11.csv`, ~600 MB) + los datos procesados que Airflow genera durante el entrenamiento.
+* Los puertos por defecto libres en el host: `9000`/`9001` (MinIO), `5050` (MLflow), `8080` (Airflow), `8001`/`8002` (FastAPI Staging/Production), `3001`/`3002` (Frontend Staging/Production). Todos son configurables desde `.env` si alguno está ocupado (ver el aviso sobre macOS y el puerto 5000 más abajo).
+
+Nota: la carga del dataset demanda uso intensivo de memoria, y dependiendo de su configuración local, este paso puede exceder los recursos disponibles para Docker generando un Out of Memory error. Si encuentra este problema trabaje con un dataset más chico. Por ejemplo, puede recortar la cantidad de files del presente dataset con el comando `head -n 1000 dataset/TMDB_movie_dataset_v11.csv > dataset/TMDB_movie_dataset_v11.csv`.
+
 ### 1. Levantar la plataforma
 
-Antes de iniciar la demo, verificar que Docker y Docker Compose estén
-disponibles.
+```bash
+cp .env.template .env
+```
 
-Las credenciales y parámetros de configuración de la plataforma se encuentran
-en el archivo `.env`.
+Completar en el `.env` recién creado `AIRFLOW_FERNET_KEY` y `AIRFLOW_SECRET_KEY`, generándolos con los comandos que indica el propio `.env.template`.
+
+El resto de las variables (MinIO, Postgres, usuario admin de Airflow, puertos) ya vienen con valores demo utilizables tal cual para desarrollo local.
 
 Para levantar todos los servicios ejecutar desde la raíz del proyecto:
 
@@ -69,6 +85,8 @@ http://localhost:8080/home
 Ingresar a Airflow y revisar el DAG de entrenamiento inicial.
 
 Verificar que las tareas hayan finalizado correctamente.
+
+![AIRFLOW](./dag-airflow.jpg)
 
 ### 3. Revisar MLflow
 
@@ -94,6 +112,8 @@ Ingresar al frontend de Staging y realizar algunas predicciones.
 
 El frontend utilizará el modelo asociado al alias: staging
 
+![API UI](./frontend.jpg)
+
 ### 6. Probar Production
 
 http://localhost:3002
@@ -107,6 +127,8 @@ El frontend utilizará el modelo asociado al alias: production
 Desde Airflow ejecutar manualmente el DAG:
 
 promote-model
+
+![Promover Prod](./dag-promote-prod.jpg)
 
 Este DAG obtiene el modelo de Staging, lo promociona a Production y solicita
 a FastAPI Production que recargue el modelo. 
@@ -358,18 +380,17 @@ FLOW --> MINIO
 
 MinIO simula un servicio Amazon S3.
 
-Se utiliza para almacenar 2 buckets independientes.
+Actualmente se usan dos buckets (`DATALAKE_BUCKET_NAME` y `MODEL_ARTIFACTS_BUCKET_NAME` en `.env`):
 
-### Raw Data
+### Data Lake (`datalake`)
 
-Contiene el dataset original: TMDB_movie_dataset_v11.csv
+Contiene el dataset original (`raw/TMDB_movie_dataset_v11.csv`), subido por la tarea `load_data` del DAG. Estos datos nunca son modificados.
 
-Estos datos nunca son modificados.
-
+Nota: la separación en un bucket "Raw Data" y otro "Processed Data" que muestra el diagrama de arquitectura más arriba es el diseño objetivo; hoy ambos están unificados en este único bucket `datalake` (ver sección TODO).
 
 ---
 
-### Model Artifacts
+### Model Artifacts (`model-artifacts`)
 
 Es utilizado por MLflow como Artifact Store.
 
@@ -421,13 +442,12 @@ PredictionMovies
         Version 3
 ```
 
-Cada versión puede encontrarse en alguno de los siguientes estados:
+Cada versión puede tener asignado alguno de los siguientes **alias** (`MlflowClient.set_registered_model_alias`, no el mecanismo de *stages* que MLflow fue deprecando):
 
-* Staging
-* Production
-* Archived
+* `staging`
+* `production`
 
-Los servicios FastAPI consultan siempre el modelo correspondiente al estado de su ambiente.
+Un alias apunta siempre a una única versión, pero puede reasignarse a otra en cualquier momento (por eso "promover" un modelo es simplemente reasignar el alias `production` a la versión que antes tenía `staging`). Los servicios FastAPI consultan siempre el modelo mediante el alias correspondiente a su ambiente (`models:/PredictionMovies@staging` / `models:/PredictionMovies@production`).
 
 ---
 
@@ -635,6 +655,7 @@ Validación funcional
 Production v4
 ```
 
+No hay un estado "Archived" separado: un alias apunta siempre a una única versión, así que promover una nueva versión simplemente reasigna el alias correspondiente — no hace falta archivar la anterior explícitamente.
 
 ---
 
@@ -674,9 +695,9 @@ Esta arquitectura proporciona:
 trabajo-final-mlops1/
 │
 ├── mlops-platform/                             # codigo de infraestructura
-│   ├── airflow/
+│   ├── airflow/                                # Dockerfile + requirements.txt de Airflow
 │   │   └── Dockerfile
-│   ├── mlflow/
+│   ├── mlflow/                                 # Dockerfile + requirements.txt del server de MLflow
 │   │   └── Dockerfile
 │   └── postgresql/
 │       └── Dockerfile
@@ -686,7 +707,7 @@ trabajo-final-mlops1/
 │   │   ├── promote_model.py                    # ejecucion manual desde airflow
 │   │   └── prediction_movies_pipeline.py       # ejecucion automatica
 │   ├── dataset/
-│   │   └── # dataset
+│   │   └── # dataset                           # TMDB_movie_dataset_v11.csv, versionado con Git LFS
 │   └── ml/
 │       └── #codigo python de modelos por version
 │
@@ -701,6 +722,8 @@ trabajo-final-mlops1/
 └── README.md
 ```
 
+`fastapi-staging`/`fastapi-production` y `frontend-staging`/`frontend-production` **no** son directorios separados: son la misma imagen de `client-app/fastapi`/`client-app/react`, instanciada dos veces en `docker-compose.yml` y diferenciada por variables de entorno (`MODEL_ALIAS`) y build args (`VITE_API_URL`).
+
 ---
 
 # Configuración
@@ -713,8 +736,13 @@ La plataforma se configura mediante un archivo `.env` en la raíz del repositori
 cp .env.template .env
 ```
 
-`.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. La mayoría son credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están. El propio `.env` **no** se versiona (ver `.gitignore`) porque a partir de ahora contiene una credencial real, no solo valores demo: la API key de Kaggle.
+`.env.template` (versionado en git) documenta todas las variables necesarias con valores de ejemplo. Son todas credenciales demo para desarrollo local (MinIO, Postgres, Airflow) y pueden dejarse como están.
 
+## Dataset
+
+`TMDB_movie_dataset_v11.csv` está versionado directamente en el repositorio, en `mlops-platform/dataset/`, usando [Git LFS](https://git-lfs.com/) (pesa ~600MB, demasiado para versionarlo como blob normal de git). Por eso hace falta tener `git-lfs` instalado (`git lfs install`, una única vez por máquina) **antes** de clonar o hacer `git pull` — si el archivo aparece como un texto corto tipo `version https://git-lfs.github.com/spec/v1 ...` en vez del CSV real, es que faltó ese paso: correr `git lfs pull` para traer el contenido real.
+
+La tarea `load_data` del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) sube ese archivo al bucket Raw Data de MinIO la primera vez que se corre el DAG (si el archivo ya está en MinIO, no lo vuelve a subir). Esto no pasa solo: hay que disparar el DAG manualmente (UI via http://localhost:8080 o `airflow dags trigger prediction_movies_pipeline`) y, si es la primera vez que corre, despausarlo antes (manualmente en la UI o `airflow dags unpause prediction_movies_pipeline`), porque todo DAG nuevo arranca pausado en Airflow.
 
 ---
 
@@ -734,21 +762,3 @@ cp .env.template .env
 
 ---
 
-# TODO
-
-El esqueleto de contenedores (Docker Compose, redes, Dockerfiles) ya está armado y probado de punta a punta. Parte de la lógica de Machine Learning ya quedó implementada y conectada. Este es el estado actual del proyecto:
-
-- [x] Portar la limpieza y validación de datos del notebook (`prediction_movies_imdb.ipynb`) a `mlops-platform/ml/preprocessing`.
-- [x] Portar el feature engineering (encoding de `original_language`, `genres`, `production_countries`, `production_companies`) a `mlops-platform/ml/preprocessing`.
-- [x] Portar el entrenamiento y la evaluación del modelo a `mlops-platform/ml/training`.
-- [x] Implementar el registro del modelo entrenado (`register_model`) en el Model Registry de MLflow, bajo el nombre `PredictionMovies`.
-- [x] Subir `TMDB_movie_dataset_v11.csv` al bucket Raw Data de MinIO (o automatizar su descarga) y completar la tarea `load_data` del DAG.
-- [x] Conectar las tareas del DAG (`mlops-platform/dags/prediction_movies_pipeline.py`) con las funciones reales de `ml/`.
-- [x] Correr el DAG de punta a punta y confirmar que el modelo `PredictionMovies` queda registrado en MLflow.
-- [x] Promover una primera versión del modelo a Staging en el Model Registry, usando alias (`staging`).
-- [x] Implementar `ml/inference` (carga del modelo + preprocesamiento del request) y conectarlo al endpoint `/predict` de FastAPI.
-- [x] Validar `fastapi-staging` con un modelo real en Staging.
-- [ ] Promover el modelo a Production una vez validado y confirmar que `fastapi-production` lo carga correctamente.
-- [x] Reemplazar el frontend placeholder por un formulario real que envíe `budget`, `runtime`, `original_language`, `genres`, `production_countries` y `production_companies` a `/predict`.
-- [ ] (nice-to-have) Separar el bucket "Processed Data" del bucket "Raw Data" en MinIO, tal como describe la arquitectura de este documento (hoy están unificados en un solo bucket `datalake`).
-- [ ] ver manejo de las credenciales dummy de `.env` (MinIO, Postgres, Airflow), hoy agregadas explicitamente.

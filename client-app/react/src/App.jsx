@@ -46,8 +46,8 @@ function App() {
       original_language: form.original_language.trim(),
       release_date: form.release_date,
       genres: parseList(form.genres),
-      production_countries: parseList(form.production_countries),
       production_companies: parseList(form.production_companies),
+      production_countries: parseList(form.production_countries),
     };
 
     try {

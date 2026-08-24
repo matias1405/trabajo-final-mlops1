@@ -141,6 +141,7 @@ services:
     volumes: &airflow-common-volumes
       - ./prediction_movies_ml/dags:/opt/airflow/dags
       - ./prediction_movies_ml/ml:/opt/airflow/ml
+      # Dataset versionado con Git LFS: lo sube load_data a MinIO la primera
       - ./prediction_movies_ml/dataset:/opt/airflow/dataset
       - airflow-logs:/opt/airflow/logs
       - ./volumes/airflow-data:/opt/airflow/data

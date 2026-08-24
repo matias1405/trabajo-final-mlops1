@@ -37,6 +37,7 @@ app.add_middleware(
 )
 
 model = None
+encoder = None
 
 
 class PredictionRequest(BaseModel):
