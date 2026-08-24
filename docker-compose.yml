@@ -3,7 +3,7 @@ services:
   # (datos raw, datos procesados) y el Artifact Store de MLflow.
   s3:
     restart: always
-    image: minio/minio:latest
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: minio
     ports:
       - "${MINIO_PORT}:9000"
@@ -26,7 +26,7 @@ services:
   # Job de inicialización: crea en MinIO los buckets que usa la plataforma
   # (Data Lake y Artifact Store de MLflow) y luego termina.
   s3-buckets-init:
-    image: minio/mc:latest
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: s3-buckets-init
     depends_on:
       s3:
@@ -54,14 +54,15 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - AIRFLOW_DB_NAME=${AIRFLOW_DB_NAME}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} && pg_isready -U ${POSTGRES_USER} -d ${AIRFLOW_DB_NAME}"]
       interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 60s
 
   # MLflow: administra el ciclo de vida del modelo (Experiment Tracking y
   # Model Registry). Usa Postgres como Backend Store y MinIO como Artifact
@@ -90,8 +91,25 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 15s
+
+  # airflow usa UID 50000 y GID 0
+  airflow-permissions:
+    build: ./mlops-platform/airflow
+    container_name: airflow-permissions
+    user: "0:0"
+    networks:
+      - ml-platform-network
+    volumes:
+      - ./volumes/airflow-data:/opt/airflow/data
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        chown -R 50000:0 /opt/airflow/data
+        chmod -R g+rwX /opt/airflow/data
 
   # Job de inicialización de Airflow: corre las migraciones de base de datos
   # y crea el usuario administrador. Corre una única vez y termina; los
@@ -102,6 +120,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      airflow-permissions:
+        condition: service_completed_successfully
     networks:
       - ml-platform-network
     environment: &airflow-common-env
@@ -110,26 +130,29 @@ services:
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__LOGGING__WORKER_LOG_SERVER_PORT: "8793"
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: http://s3:9000
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
       DATALAKE_BUCKET_NAME: ${DATALAKE_BUCKET_NAME}
-      # Token de la API de Kaggle, usado por la tarea load_data para
-      # descargar el dataset la primera vez (ver .env.template).
-      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
       # Permite `from ml import ...` en los DAGs: ml/ se monta como hermano de dags/.
       PYTHONPATH: /opt/airflow
     volumes: &airflow-common-volumes
-      - ./mlops-platform/dags:/opt/airflow/dags
-      - ./mlops-platform/ml:/opt/airflow/ml
+      - ./prediction_movies_ml/dags:/opt/airflow/dags
+      - ./prediction_movies_ml/ml:/opt/airflow/ml
+      # Dataset versionado con Git LFS: lo sube load_data a MinIO la primera
+      - ./prediction_movies_ml/dataset:/opt/airflow/dataset
       - airflow-logs:/opt/airflow/logs
       - ./volumes/airflow-data:/opt/airflow/data
-    entrypoint: >
-      /bin/bash -c "
-      airflow db migrate &&
-      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Admin --lastname Admin --role Admin --email ${AIRFLOW_ADMIN_EMAIL}
-      "
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users create --username "${AIRFLOW_ADMIN_USER}" --password "${AIRFLOW_ADMIN_PASSWORD}" --firstname Admin \
+          --lastname Admin --role Admin --email "${AIRFLOW_ADMIN_EMAIL}"
 
   # Airflow Webserver: expone la UI para inspeccionar y disparar
   # manualmente el pipeline de entrenamiento (DAG).
@@ -154,7 +177,9 @@ services:
   # -> limpieza -> feature engineering -> entrenamiento -> evaluación ->
   # registro en MLflow) según su schedule o disparos manuales.
   airflow-scheduler:
-    build: ./mlops-platform/airflow
+    build:
+      context: ./mlops-platform/airflow
+      dockerfile: Dockerfile.ml
     restart: always
     container_name: airflow-scheduler
     depends_on:
@@ -164,7 +189,12 @@ services:
         condition: service_healthy
     networks:
       - ml-platform-network
-    environment: *airflow-common-env
+    environment: 
+      <<: *airflow-common-env
+      MODEL_RELOAD_TOKEN: ${MODEL_RELOAD_TOKEN}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      FASTAPI_STAGING_PORT: ${FASTAPI_STAGING_PORT}
+      FASTAPI_PRODUCTION_PORT: ${FASTAPI_PRODUCTION_PORT}
     volumes: *airflow-common-volumes
     command: scheduler
 
@@ -173,7 +203,9 @@ services:
   # antes de promoverla a Production. Solo accesible desde staging-network,
   # más un enlace a ml-platform-network para consultar/descargar el modelo.
   fastapi-staging:
-    build: ./client-app/fastapi
+    build:
+      context: .
+      dockerfile: ./client-app/fastapi/Dockerfile
     restart: always
     container_name: fastapi-staging
     depends_on:
@@ -186,17 +218,27 @@ services:
       - "${FASTAPI_STAGING_PORT}:8000"
     environment:
       - MODEL_NAME=${MODEL_NAME}
-      - MODEL_STAGE=Staging
+      - MODEL_ALIAS=staging
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
+      - PYTHONPATH=/opt/mlops-platform
+      - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 100
+      start_period: 120s
 
   # FastAPI Production: expone el modelo en estado "Production" del Model
   # Registry, consumido por los usuarios finales. Aislado en
   # production-network; nunca comparte red con Staging.
   fastapi-production:
-    build: ./client-app/fastapi
+    build:
+      context: .
+      dockerfile: ./client-app/fastapi/Dockerfile
     restart: always
     container_name: fastapi-production
     depends_on:
@@ -209,11 +251,19 @@ services:
       - "${FASTAPI_PRODUCTION_PORT}:8000"
     environment:
       - MODEL_NAME=${MODEL_NAME}
-      - MODEL_STAGE=Production
+      - MODEL_ALIAS=production
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
       - AWS_ACCESS_KEY_ID=${MINIO_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_PASS}
+      - PYTHONPATH=/opt/mlops-platform
+      - MODEL_RELOAD_TOKEN=${MODEL_RELOAD_TOKEN}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 100
+      start_period: 120s
 
   # Frontend Staging: aplicación cliente (React) usada por el equipo de QA
   # para probar el modelo en Staging. Solo se comunica con FastAPI Staging,
@@ -226,7 +276,8 @@ services:
     restart: always
     container_name: frontend-staging
     depends_on:
-      - fastapi-staging
+      fastapi-staging:
+        condition: service_healthy
     networks:
       - staging-network
     ports:
@@ -242,7 +293,8 @@ services:
     restart: always
     container_name: frontend-production
     depends_on:
-      - fastapi-production
+      fastapi-production:
+        condition: service_healthy
     networks:
       - production-network
     ports:
