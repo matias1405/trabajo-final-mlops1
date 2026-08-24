@@ -40,12 +40,13 @@ model = None
 
 
 class PredictionRequest(BaseModel):
-    budget: float
     runtime: float
+    budget: float
     original_language: str
+    release_date: str
     genres: list[str]
-    production_countries: list[str]
     production_companies: list[str]
+    production_countries: list[str]
 
 
 @app.on_event("startup")

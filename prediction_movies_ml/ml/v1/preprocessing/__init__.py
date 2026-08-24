@@ -52,9 +52,9 @@ def split(df):
     df["profitable"] = (df["revenue"] >= df["budget"]).astype(int)
 
     # Features que sí queremos conservar
-    X = df.drop(columns=["profitable","revenue","id","adult"])
+    X = df.drop(columns=["profitable","revenue","id","adult", "popularity", "vote_average", "vote_count"])
     y = df["profitable"]
-
+    X.info()
     # Split
     X_train, X_test, y_train, y_test = train_test_split(
         X,

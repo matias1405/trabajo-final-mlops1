@@ -41,8 +41,8 @@ function App() {
     setResult(null);
 
     const payload = {
-      budget: Number(form.budget),
       runtime: Number(form.runtime),
+      budget: Number(form.budget),
       original_language: form.original_language.trim(),
       release_date: form.release_date,
       genres: parseList(form.genres),
